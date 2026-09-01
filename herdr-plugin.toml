@@ -1,0 +1,34 @@
+id = "daocoding.claude-lifecycle"
+name = "Claude Lifecycle"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Hook-first Claude Code lifecycle for herdr: working/blocked/idle from Claude's own hooks, with Stop.background_tasks as the idle discriminator. Includes `verify` for every Claude Code update."
+platforms = ["linux", "macos"]
+
+# Startup: cheap wiring check only (never spawns claude). Full `verify` is an action.
+[[startup]]
+command = ["python3", "bin/claude-lifecycle", "verify", "--quiet"]
+
+[[actions]]
+id = "install-hooks"
+title = "Claude Lifecycle: install Claude Code hooks"
+contexts = ["workspace"]
+command = ["python3", "bin/claude-lifecycle", "install-hooks"]
+
+[[actions]]
+id = "uninstall-hooks"
+title = "Claude Lifecycle: remove Claude Code hooks"
+contexts = ["workspace"]
+command = ["python3", "bin/claude-lifecycle", "uninstall-hooks"]
+
+[[actions]]
+id = "verify"
+title = "Claude Lifecycle: verify against installed Claude Code"
+contexts = ["workspace"]
+command = ["python3", "bin/claude-lifecycle", "verify"]
+
+[[actions]]
+id = "capture"
+title = "Claude Lifecycle: capture fresh hook fixtures (runs a throwaway claude -p)"
+contexts = ["workspace"]
+command = ["python3", "bin/claude-lifecycle", "capture"]
