@@ -25,7 +25,7 @@ while True:
 PY
 SRV=$!; sleep 0.4
 run(){ printf '%s' "$2" | XDG_STATE_HOME="$T/$1" HERDR_ENV=1 HERDR_PANE_ID=t:p1 HERDR_SOCKET_PATH="$T/fake.sock" python3 "$H"; }
-sent(){ grep -c "\"method\": \"$1\"" "$T/log" 2>/dev/null || echo 0; }
+sent(){ n=$(grep -c "\"method\": \"$1\"" "$T/log" 2>/dev/null); echo "${n:-0}"; }
 echo "── POSITIVE: fake foreground pid = $$ (this shell, an ancestor of the hook)"; echo $$ >"$T/fg"; : >"$T/log"
 run pos '{"hook_event_name":"SessionStart","session_id":"s-pos","source":"startup"}'; run pos '{"hook_event_name":"UserPromptSubmit","session_id":"s-pos"}'
 echo "  report_agent_session sent: $(sent pane.report_agent_session)   report_agent sent: $(sent pane.report_agent)   process_info asked: $(sent pane.process_info)"
