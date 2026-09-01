@@ -1,10 +1,10 @@
 #!/bin/sh
 # Feeds synthetic hook payloads; asserts state file + stdout silence + exit 0. herdr absent.
-set -u; R=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd); H="$R/hooks/claude-lifecycle.sh"
+set -u; R=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd); H="$R/hooks/claude-lifecycle.py"
 T=$(mktemp -d); export XDG_STATE_HOME="$T"; unset HERDR_ENV HERDR_PANE_ID HERDR_SOCKET_PATH
 S="$T/omarchy/claude-lifecycle"; pass=0; fail=0
 t(){ # name  payload  expected_state|IGNORED
-  out=$(printf '%s' "$2" | sh "$H"); rc=$?
+  out=$(printf '%s' "$2" | python3 "$H"); rc=$?
   st=$(python3 -c 'import json,sys,os;p=sys.argv[1];print(json.load(open(p))["state"] if os.path.exists(p) else "NONE")' "$S/current.json" 2>/dev/null)
   ok=1; [ $rc -eq 0 ] || ok=0; [ -z "$out" ] || ok=0
   if [ "$3" = IGNORED ]; then [ "$st" = "$4" ] || ok=0; else [ "$st" = "$3" ] || ok=0; fi
@@ -19,6 +19,7 @@ t PermissionRequest "{\"hook_event_name\":\"PermissionRequest\",\"session_id\":\
 t Notif-idle-ignored "{\"hook_event_name\":\"Notification\",\"session_id\":\"$SID\",\"notification_type\":\"idle_prompt\"}" IGNORED blocked
 t Notif-permission  "{\"hook_event_name\":\"Notification\",\"session_id\":\"$SID\",\"notification_type\":\"permission_prompt\"}" blocked
 t Stop-with-bg      "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"background_tasks\":[{\"id\":\"t1\",\"type\":\"MCP task\",\"status\":\"running\",\"server\":\"codex\",\"tool\":\"review\"}],\"session_crons\":[]}" working
+echo "  bg payload slimmed: $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["background_tasks"])' "$S/current.json")"
 t Stop-empty-bg     "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"background_tasks\":[],\"session_crons\":[]}" idle
 t SubagentStop-ign  "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"$SID\"}" IGNORED idle
 t subagent-ign      "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"$SID\",\"agent_id\":\"sub-1\"}" IGNORED idle

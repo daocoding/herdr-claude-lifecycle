@@ -2,13 +2,13 @@
 """claude-lifecycle — install/uninstall the Claude Code hooks, verify, status. CONTRACT.md §4."""
 import json, os, shutil, subprocess, sys, tempfile, time, glob
 HERE=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HOOK=os.path.join(HERE,"hooks","claude-lifecycle.sh")
+HOOK=os.path.join(HERE,"hooks","claude-lifecycle.py")
 EVENTS=["SessionStart","UserPromptSubmit","PreToolUse","PostToolUse","PostToolUseFailure","PermissionRequest",
         "Notification","Elicitation","ElicitationResult","Stop","SubagentStop","TaskCompleted","PreCompact","SessionEnd"]
 NO_MATCHER={"UserPromptSubmit","Stop","TaskCompleted"}          # hooks.md: no matcher support
 SETTINGS=os.environ.get("CLAUDE_LIFECYCLE_SETTINGS") or os.path.join(os.environ.get("CLAUDE_CONFIG_DIR",os.path.expanduser("~/.claude")),"settings.json")
 STATE_ROOT=os.path.join(os.environ.get("XDG_STATE_HOME",os.path.expanduser("~/.local/state")),"omarchy","claude-lifecycle")
-MARK="claude-lifecycle.sh"
+MARK="claude-lifecycle.py"
 def load():
     try: return json.load(open(SETTINGS))
     except FileNotFoundError: return {}
@@ -17,7 +17,7 @@ def save(d):
     if os.path.exists(SETTINGS): shutil.copy2(SETTINGS,SETTINGS+f".bak-claude-lifecycle-{int(time.time())}")
     tmp=SETTINGS+".tmp"; json.dump(d,open(tmp,"w"),indent=2); open(tmp,"a").write("\n"); os.replace(tmp,SETTINGS)
 def entry(ev):
-    e={"hooks":[{"type":"command","command":f"bash '{HOOK}'","timeout":10}]}
+    e={"hooks":[{"type":"command","command":f"python3 '{HOOK}'","timeout":10}]}
     if ev not in NO_MATCHER: e["matcher"]="*"
     return e
 def ours(grp): return any(MARK in (h.get("command") or "") for h in grp.get("hooks",[]))
@@ -39,7 +39,7 @@ def run_fixture(path):
     payload=open(path).read(); ev=json.loads(payload).get("hook_event_name")
     with tempfile.TemporaryDirectory() as td:
         env=dict(os.environ,XDG_STATE_HOME=td,HERDR_ENV="0"); env.pop("HERDR_PANE_ID",None)
-        p=subprocess.run(["sh",HOOK],input=payload,capture_output=True,text=True,env=env,timeout=5)
+        p=subprocess.run(["python3",HOOK],input=payload,capture_output=True,text=True,env=env,timeout=5)
         files=glob.glob(os.path.join(td,"omarchy","claude-lifecycle","*.json"))
         state=None
         cur=os.path.join(td,"omarchy","claude-lifecycle","current.json")
@@ -85,7 +85,9 @@ def capture():
     settings={"hooks":{ev:[{**({} if ev in NO_MATCHER else {"matcher":"*"}),"hooks":[{"type":"command","command":f"bash '{hook}'","timeout":10}]}] for ev in EVENTS}}
     sf=os.path.join(cap,"settings.json"); json.dump(settings,open(sf,"w"))
     env=dict(os.environ,CLAUDE_LIFECYCLE_CAPTURE_DIR=cap)
-    subprocess.run(["claude","-p","Reply with exactly: ok","--settings",sf,"--max-turns","1"],capture_output=True,text=True,env=env,timeout=180)
+    for k in ("CLAUDECODE","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_CHILD_SESSION"): env.pop(k,None)
+    r=subprocess.run(["claude","-p","Reply with exactly: ok","--settings",sf,"--max-turns","1"],capture_output=True,text=True,env=env,timeout=180)
+    print(f"claude -p exit {r.returncode}: {(r.stdout or r.stderr).strip()[:200]!r}")
     got=sorted(glob.glob(os.path.join(cap,"*.json"))); got=[g for g in got if not g.endswith("settings.json")]
     os.makedirs(os.path.join(HERE,"fixtures"),exist_ok=True); kept=[]
     for g in got:
