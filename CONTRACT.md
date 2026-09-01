@@ -90,3 +90,15 @@ Consumers must treat `updated_at` older than 15 min as stale → hide.
 - **`claude --settings <file>` MERGES** with `~/.claude/settings.json`; `capture`/`e2e` therefore scrub `HERDR_*` so an installed herdr hook cannot claim a real pane for a throwaway session (it did, once — w2:p2, session 2793a917).
 - **`Stop.background_tasks` is present** in real payloads on 2.1.251, 2.1.252 and 2.1.257. **No hook payload carries `version`** — the version is stamped by `install-hooks`/`verify` (never spawned inside a hook). `PermissionRequest`/`Notification` do not fire under `claude -p`; their fixtures come from an interactive session.
 - **Route A migration:** after `herdr integration uninstall claude`, existing panes keep their `herdr:claude` identity until that Claude exits ⇒ exit and relaunch `claude` once per pane; if a stale ref survives (pane was a bare shell), close and recreate the pane. New panes need nothing.
+
+
+## 7. Decision (2026-09-01, Cody; raised by Mate's handoff): pane-owner gate + identity under our source
+
+**Rule:** inside herdr, a hook may speak for a pane **only if the Claude that spawned it is in that pane's foreground process set** — `pane.process_info {target}` → `foreground_processes[].pid` ∩ the hook's ancestor pids, or `foreground_process_group_id == getpgrp()`. Verdict is cached per session (`pane_owner` in the session file) from `SessionStart`; if herdr cannot answer, nothing is cached and the next event retries — never fail open, never cache a failure.
+
+**What the gate buys:**
+- **Identity is back without the hazard.** On `SessionStart`, an owning session reports `pane.report_agent_session` under `daocoding:claude` (`agent_session_id` = Claude's `session_id`, `session_start_source` = the payload's `source`), so `agent_session` is populated for Claude panes again and the herd's documented readback route (session id from `agent_session`) keeps its anchor. herdr's `claude --resume` restore still refuses non-official sources — no new loss versus Route A.
+- **The pane-env foot-gun is closed for our source.** A `claude -p` started from a pane's shell inherits `HERDR_PANE_ID` but is not the pane's foreground process ⇒ it writes its own session file only: no herdr report, no identity, and it never overwrites `current.json`.
+- `CLAUDE_LIFECYCLE_SKIP_GATE=1` exists for tests/harnesses that feed fixtures from outside a pane (`tests/herdr-live.sh` uses it); the installed hooks never set it.
+
+**Cost:** one extra socket round-trip per session (not per event). Tested: `tests/gate.sh` (fake herdr: positive, negative, herdr-down) and live on matebook (SSH feed = negative, `herdr pane run` feed = positive).

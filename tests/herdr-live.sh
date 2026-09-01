@@ -3,7 +3,7 @@
 # usage: tests/herdr-live.sh <pane_id>   — ONLY on a throwaway pane; it authors state and releases at the end.
 set -u; P="${1:?pane_id}"; R=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd); H="$R/hooks/claude-lifecycle.py"
 SOCK="${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}"; [ -S "$SOCK" ] || { echo "no herdr socket at $SOCK"; exit 2; }
-export HERDR_ENV=1 HERDR_PANE_ID="$P" HERDR_SOCKET_PATH="$SOCK" XDG_STATE_HOME="${XDG_STATE_HOME:-$(mktemp -d)}"
+export HERDR_ENV=1 HERDR_PANE_ID="$P" HERDR_SOCKET_PATH="$SOCK" CLAUDE_LIFECYCLE_SKIP_GATE=1   # fed from outside the pane: bypass the owner gate on purpose XDG_STATE_HOME="${XDG_STATE_HOME:-$(mktemp -d)}"
 rb(){ python3 - "$P" <<'PYRB'
 import socket,sys,json,os
 p=sys.argv[1]; s=socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(os.environ["HERDR_SOCKET_PATH"])

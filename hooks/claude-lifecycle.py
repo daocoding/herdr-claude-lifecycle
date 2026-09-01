@@ -27,6 +27,48 @@ def _stamp(root):
     try: return open(os.path.join(root, "claude_version")).read().strip() or None
     except Exception: return None
 
+def _rpc(sock_path, method, params, timeout=0.5):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(timeout)
+    try:
+        s.connect(sock_path); s.sendall((json.dumps({"id": f"cl:{time.time_ns()}", "method": method, "params": params}, separators=(",", ":")) + "\n").encode())
+        b = b""
+        while not b.endswith(b"\n"):
+            c = s.recv(65536)
+            if not c: break
+            b += c
+        return json.loads(b) if b else None
+    except Exception:
+        return None
+    finally: s.close()
+
+def _ancestors(limit=8):
+    """pids of this process's ancestors (parent first). Linux via /proc; macOS via ps."""
+    out, pid = [], os.getppid()
+    for _ in range(limit):
+        if pid <= 1: break
+        out.append(pid)
+        try:
+            with open(f"/proc/{pid}/stat") as f: pid = int(f.read().split(")")[-1].split()[1])
+        except Exception:
+            try:
+                import subprocess
+                pid = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True, timeout=0.3).stdout.strip() or 0)
+            except Exception: break
+    return out
+
+def pane_owner_gate(sock_path, pane):
+    """True/False = this hook's Claude is/isn't the pane's foreground process. None = herdr could not answer (do not cache)."""
+    r = _rpc(sock_path, "pane.process_info", {"target": pane})
+    info = ((r or {}).get("result") or {}).get("process_info") if r else None
+    if not info: return None
+    fg = {int(p.get("pid")) for p in (info.get("foreground_processes") or []) if p.get("pid") is not None}
+    pgid = info.get("foreground_process_group_id")
+    if pgid is not None:
+        try:
+            if os.getpgrp() == int(pgid): return True
+        except Exception: pass
+    return any(a in fg for a in _ancestors())
+
 def main():
     raw = sys.stdin.read()
     if not raw.strip(): return
@@ -69,15 +111,25 @@ def main():
         tmp = seqf + f".tmp.{os.getpid()}"; open(tmp, "w").write(str(seq)); os.replace(tmp, seqf)
         # ── consumer 3b: state file ──
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()); f = os.path.join(root, sid + ".json"); since = ts
+        prev_rec = {}
         try:
-            p = json.load(open(f))
-            if p.get("state") == state: since = p.get("since") or ts
+            prev_rec = json.load(open(f))
+            if prev_rec.get("state") == state: since = prev_rec.get("since") or ts
         except Exception: pass
+        # ── pane-owner gate (herdr only): may this Claude speak for the pane? cached per session; None never cached ──
+        sock = os.environ.get("HERDR_SOCKET_PATH") or ""
+        in_herdr = os.environ.get("HERDR_ENV") == "1" and bool(pane) and bool(sock)
+        owner = prev_rec.get("pane_owner") if isinstance(prev_rec.get("pane_owner"), bool) else None
+        if in_herdr and owner is None and os.environ.get("CLAUDE_LIFECYCLE_SKIP_GATE") != "1":
+            owner = pane_owner_gate(sock, pane)
+        if in_herdr and os.environ.get("CLAUDE_LIFECYCLE_SKIP_GATE") == "1": owner = True
         slim = [{k: t.get(k) for k in ("type", "status", "server", "tool", "agent_type", "name") if t.get(k) is not None} for t in bg]
         rec = {"contract_version": 1, "session_id": sid, "state": state, "since": since, "updated_at": ts, "pane_id": pane or None,
-               "background_tasks": slim, "block_reason": reason or None, "last_event": ev,
+               "pane_owner": owner, "background_tasks": slim, "block_reason": reason or None, "last_event": ev,
                "claude_version": h.get("version") or _stamp(root), "reporter_version": REPORTER_VERSION}
-        for path in (f, os.path.join(root, "current.json")):
+        # current.json = "the" Claude the bar shows: never let a non-owning session inside herdr (e.g. a `claude -p` from a pane shell) overwrite it
+        targets = [f] + ([] if (in_herdr and owner is not True) else [os.path.join(root, "current.json")])
+        for path in targets:
             tmp = path + f".tmp.{os.getpid()}"; open(tmp, "w").write(json.dumps(rec, separators=(",", ":"))); os.replace(tmp, path)
         if state == "release":
             try: os.remove(f)
@@ -87,9 +139,14 @@ def main():
         except FileNotFoundError: pass
         try: os.rmdir(lock)
         except OSError: pass
-    # ── consumer 3a: herdr, only inside a herdr pane ──
-    sock = os.environ.get("HERDR_SOCKET_PATH") or ""
-    if os.environ.get("HERDR_ENV") != "1" or not pane or not sock: return
+    # ── consumer 3a: herdr, only inside a herdr pane AND only if this Claude is the pane's foreground process ──
+    if not in_herdr: return
+    if owner is not True:
+        if os.environ.get("CLAUDE_LIFECYCLE_DEBUG") == "1": sys.stderr.write(f"claude-lifecycle: {ev} not reported to herdr (pane_owner={owner})\n")
+        return
+    if ev == "SessionStart" and sid != "unknown":
+        _rpc(sock, "pane.report_agent_session", {"pane_id": pane, "source": source, "agent": "claude", "seq": seq,
+                                                  "agent_session_id": sid, "session_start_source": str(h.get("source") or "startup")})
     if state == "release":
         req = {"id": f"{source}:{seq}", "method": "pane.release_agent", "params": {"pane_id": pane, "source": source, "agent": "claude", "seq": seq}}  # seq: herdr's ordering guard drops a seq-less release as stale
     else:
