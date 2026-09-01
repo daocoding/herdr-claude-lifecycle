@@ -17,7 +17,8 @@ print("%-8s agent=%s seq=%s session_src=%s labels=%s" % (a.get("agent_status","?
 PYRB
 }
 feed(){ printf '%s' "$2" | python3 "$H"; sleep 0.25; got=$(rb); st=${got%% *}
-  if [ "$st" = "$3" ]; then echo "  ok   $1 → $got"; else echo "  FAIL $1 → $got   (want $3)"; fail=$((fail+1)); fi; }
+  # herdr renders a reported idle as `done` on a pane not viewed since it went idle — its presentation, not ours
+  if [ "$st" = "$3" ] || { [ "$3" = idle ] && [ "$st" = done ]; }; then echo "  ok   $1 → $got"; else echo "  FAIL $1 → $got   (want $3)"; fail=$((fail+1)); fi; }
 fail=0; SID="live-$$"
 echo "  row0 BEFORE            → $(rb)"
 feed UserPromptSubmit  "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"$SID\"}" working
@@ -27,5 +28,6 @@ feed Stop+bg           "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"
 feed Stop              "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"background_tasks\":[]}" idle
 feed Notif:permission  "{\"hook_event_name\":\"Notification\",\"session_id\":\"$SID\",\"notification_type\":\"permission_prompt\"}" blocked
 printf '%s' "{\"hook_event_name\":\"SessionEnd\",\"session_id\":\"$SID\"}" | python3 "$H"; sleep 0.25
-echo "  after SessionEnd/release → $(rb)"
+got=$(rb); st=${got%% *}
+case "$st" in unknown|\?*) echo "  ok   SessionEnd/release → $got";; *) echo "  FAIL SessionEnd/release → $got   (want unknown: authored state cleared)"; fail=$((fail+1));; esac
 echo "── herdr-live: $fail failed"; [ $fail -eq 0 ]

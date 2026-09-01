@@ -91,7 +91,7 @@ def main():
     sock = os.environ.get("HERDR_SOCKET_PATH") or ""
     if os.environ.get("HERDR_ENV") != "1" or not pane or not sock: return
     if state == "release":
-        req = {"id": f"{source}:{seq}", "method": "pane.release_agent", "params": {"pane_id": pane, "source": source, "agent": "claude"}}
+        req = {"id": f"{source}:{seq}", "method": "pane.release_agent", "params": {"pane_id": pane, "source": source, "agent": "claude", "seq": seq}}  # seq: herdr's ordering guard drops a seq-less release as stale
     else:
         params = {"pane_id": pane, "source": source, "agent": "claude", "state": state, "seq": seq}
         if reason: params["message"] = reason
