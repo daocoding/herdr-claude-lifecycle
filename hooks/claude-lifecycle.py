@@ -56,6 +56,20 @@ def _ancestors(limit=8):
             except Exception: break
     return out
 
+def pane_identity(sock_path, pane):
+    """{workspace_id, workspace_label, pane_name, agent_type} for the bar to show instead of a raw pane id.
+    Best-effort: any failure returns {} so the caller falls back to the previous record's values."""
+    r = _rpc(sock_path, "agent.get", {"target": pane})
+    a = ((r or {}).get("result") or {}).get("agent") if r else None
+    if not a or str(a.get("pane_id")) != str(pane): return {}
+    out = {"pane_name": a.get("name"), "agent_type": a.get("agent"), "workspace_id": a.get("workspace_id")}
+    ws = a.get("workspace_id")
+    if ws:
+        r2 = _rpc(sock_path, "workspace.get", {"workspace_id": ws})
+        w = ((r2 or {}).get("result") or {}).get("workspace") if r2 else None
+        if w and str(w.get("workspace_id")) == str(ws): out["workspace_label"] = w.get("label")
+    return out
+
 def pane_owner_gate(sock_path, pane):
     """True/False = this hook's Claude is/isn't the pane's foreground process. None = herdr could not answer FOR THIS PANE (do not cache).
     herdr silently falls back to the focused pane when the param name is not the one it expects, so the answer is accepted
@@ -132,8 +146,15 @@ def main():
             owner = pane_owner_gate(sock, pane)
         if in_herdr and os.environ.get("CLAUDE_LIFECYCLE_SKIP_GATE") == "1": owner = True
         slim = [{k: t.get(k) for k in ("type", "status", "server", "tool", "agent_type", "name") if t.get(k) is not None} for t in bg]
+        identity = {}
+        if in_herdr and owner is True:
+            identity = pane_identity(sock, pane)
+        for k in ("workspace_id", "workspace_label", "pane_name", "agent_type"):
+            if k not in identity and prev_rec.get(k) is not None: identity[k] = prev_rec[k]
         rec = {"contract_version": 1, "session_id": sid, "state": state, "since": since, "updated_at": ts, "pane_id": pane or None,
-               "pane_owner": owner, "background_tasks": slim, "block_reason": reason or None, "last_event": ev,
+               "pane_owner": owner, "workspace_id": identity.get("workspace_id"), "workspace_label": identity.get("workspace_label"),
+               "pane_name": identity.get("pane_name"), "agent_type": identity.get("agent_type"),
+               "background_tasks": slim, "block_reason": reason or None, "last_event": ev,
                "claude_version": h.get("version") or _stamp(root), "reporter_version": REPORTER_VERSION}
         # current.json = "the" Claude the bar shows: never let a non-owning session inside herdr (e.g. a `claude -p` from a pane shell) overwrite it
         targets = [f] + ([] if (in_herdr and owner is not True) else [os.path.join(root, "current.json")])
