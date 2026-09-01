@@ -148,6 +148,22 @@ def scrub(path):
             if isinstance(d.get(k),str): d[k]=d[k].replace(home,"~")
         json.dump(d,open(path,"w"),indent=1)
     except Exception: pass
+def harvest():
+    """harvest on|off|collect — dump raw payloads from REAL sessions (to get interactive-only fixtures: PermissionRequest, Notification, Elicitation)."""
+    arg=(sys.argv[2:] or ["collect"])[0]; flag=os.path.join(STATE_ROOT,"harvest"); raw=os.path.join(STATE_ROOT,"raw")
+    if arg=="on": os.makedirs(raw,exist_ok=True); open(flag,"w").write(raw+"\n"); print(f"harvest ON → {raw}  (run a real session, trigger a permission prompt, then `harvest collect`)"); return 0
+    if arg=="off":
+        try: os.remove(flag)
+        except FileNotFoundError: pass
+        print("harvest OFF"); return 0
+    got={}
+    for f in sorted(glob.glob(os.path.join(raw,"*.json"))):
+        try: d=json.load(open(f))
+        except Exception: continue
+        ev=d.get("hook_event_name"); key=ev+("."+d["notification_type"] if ev=="Notification" and d.get("notification_type") else "")
+        if ev in ("PermissionRequest","Notification","Elicitation","ElicitationResult","PostToolUseFailure","TaskCompleted","PreCompact","SubagentStop") and key not in got:
+            dst=os.path.join(HERE,"fixtures",key+".json"); shutil.copy(f,dst); scrub(dst); got[key]=dst
+    print(f"collected {len(got)} interactive fixture(s): {sorted(got)}"); return 0
 def status():
     """status            → current.json (the Claude the bar shows)
        status --pane ID  → the live session that owns herdr pane ID (pane→session lookup; herdr ignores our identity report)"""
@@ -167,4 +183,4 @@ def status():
 if __name__=="__main__":
     cmd=(sys.argv[1:] or ["status"])[0]
     {"install-hooks":install_hooks,"uninstall-hooks":uninstall_hooks,"verify":lambda:sys.exit(verify()),
-     "capture":capture,"e2e":lambda:sys.exit(e2e()),"status":lambda:sys.exit(status())}.get(cmd,lambda:print("usage: claude-lifecycle install-hooks|uninstall-hooks|verify|capture|e2e|status"))()
+     "capture":capture,"e2e":lambda:sys.exit(e2e()),"harvest":lambda:sys.exit(harvest()),"status":lambda:sys.exit(status())}.get(cmd,lambda:print("usage: claude-lifecycle install-hooks|uninstall-hooks|verify|capture|e2e|harvest on|off|collect|status [--pane ID]"))()

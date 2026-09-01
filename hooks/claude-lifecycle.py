@@ -78,6 +78,9 @@ def main():
     raw = sys.stdin.read()
     if not raw.strip(): return
     cap = os.environ.get("CLAUDE_LIFECYCLE_RAW_DIR")           # optional: harvest raw payloads from a real session (NOT the capture hook's dir)
+    if not cap:                                                # or the `claude-lifecycle harvest on` toggle: a path in $STATE_ROOT/harvest
+        try: cap = open(os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "omarchy", "claude-lifecycle", "harvest")).read().strip() or None
+        except Exception: cap = None
     if cap:
         try:
             os.makedirs(cap, exist_ok=True); open(os.path.join(cap, f"{time.time_ns()}.json"), "w").write(raw)
