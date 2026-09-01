@@ -1,0 +1,81 @@
+# CONTRACT — herdr-claude-lifecycle
+
+Written first, before any code. Every component below is a consumer or producer of this contract;
+a change here is a breaking change and bumps `contract_version`.
+
+## 1. The primitive: the reporter
+
+One script, `hooks/claude-lifecycle.sh`, invoked by Claude Code hooks. It reads the hook JSON on
+stdin, derives one lifecycle state, and publishes it to every consumer that is present.
+
+**Invariants**
+- **Silent on stdout. Always.** Claude Code injects plain stdout as context on `UserPromptSubmit`
+  and `SessionStart`, and shows a `hook error` for non-JSON stdout on decision events (≥ v2.1.248).
+  Diagnostics go to stderr only, and only when `CLAUDE_LIFECYCLE_DEBUG=1`.
+- **Exit 0. Always.** A reporter failure must never block, slow, or alter Claude. Socket down,
+  herdr absent, malformed JSON — all exit 0 within the hook timeout.
+- **Fast.** Budget 100 ms. No network. One socket write, one file rename.
+- **Idempotent and ordered.** Per-source monotonic `seq` (ns since epoch, max(prev+1, now)),
+  persisted so a reporter restart never issues a lower seq (herdr silently drops lower seqs from
+  the same source — issue #3184 footgun). Serialised with a `mkdir` lock (Cline pattern).
+
+## 2. State map (Claude Code hook event → lifecycle state)
+
+| Claude hook event | payload used | → state |
+|---|---|---|
+| `SessionStart` | `session_id`, `transcript_path` | `idle` + session identity |
+| `UserPromptSubmit` | — | `working` |
+| `PreToolUse` | — | `working` |
+| `PostToolUse` / `PostToolUseFailure` | — | `working` (turn continues) |
+| `PermissionRequest` | `tool_name` | `blocked` (immediate) |
+| `Notification` | `notification_type ∈ {permission_prompt, elicitation_dialog, elicitation_url_dialog, agent_needs_input}` | `blocked` |
+| `Notification` | other types | ignored |
+| `Elicitation` / `ElicitationResult` | — | `blocked` / `working` |
+| `Stop` | `background_tasks` | **`idle` iff `background_tasks == []`, else `working`** (this is the #3090 fix) |
+| `SubagentStop` | — | **ignored** (herdr #198: fires after the main turn; never revive an idle pane) |
+| `TaskCompleted` | — | re-evaluate: if no other background task, `idle` |
+| `SessionEnd` | — | `release` |
+
+Reportable states are exactly herdr's `PaneAgentState`: `idle | working | blocked | unknown`.
+`done` is derived by herdr (idle + unseen), never reported.
+
+## 3. Consumers
+
+### 3a. herdr (present iff `HERDR_ENV=1 && HERDR_PANE_ID && HERDR_SOCKET_PATH`)
+- Method `pane.report_agent`, params `{pane_id, source, agent:"claude", state, seq, message?}`.
+- **`source = "daocoding:claude"`** — never in the `herdr:` namespace (reserved/official space;
+  `herdr:claude` is routed to identity-only by `agent_resume::is_reserved_native_state_source`).
+- Session identity: NOT reported via `pane.report_agent_session` — `session_ref_from_report`
+  refuses non-official sources, and an official-source session ref would make the pane OWNED and
+  reject our state (Route A trade-off, accepted by Tony 2026-09-01).
+- `SessionEnd` → `pane.release_agent {pane_id, source, agent}`.
+- Expected tier: **partial** — `screen_detection_skipped` stays `false`; screen-detected approval
+  UIs override our state via `visible_blocker_overrides_hook`. That is correct and desired.
+
+### 3b. State file (always written)
+`$XDG_STATE_HOME/omarchy/claude-lifecycle/<session_id>.json` (default `~/.local/state/...`),
+written atomically (tmp + rename), plus `current.json` → the most recently updated session.
+```json
+{ "contract_version": 1, "session_id": "…", "state": "working|blocked|idle|released",
+  "since": "<ISO-8601>", "updated_at": "<ISO-8601>", "pane_id": "w2:p1|null",
+  "background_tasks": [{"type":"MCP task","server":"…","tool":"…"}], "block_reason": "permission_prompt|null",
+  "claude_version": "2.1.251", "reporter_version": "0.1.0" }
+```
+Consumers must treat `updated_at` older than 15 min as stale → hide.
+
+## 4. `verify` — the update discipline
+`claude-lifecycle verify` runs on demand and MUST be run after every Claude Code update:
+1. Confirms hook wiring present in `~/.claude/settings.json` for every event in §2, none extra.
+2. Feeds recorded fixture payloads (`fixtures/<event>.json`, captured from the installed version)
+   through the parser; asserts each mapped state.
+3. **Live probe:** starts `claude -p` in a throwaway session with a hook that captures raw payloads,
+   diffs field presence against the fixtures (`background_tasks`, `notification_type`,
+   `hook_event_name`, `session_id`). Any missing field = FAIL, exit 1, named field.
+4. Reports the installed `claude --version` and the fixture version side by side.
+
+## 5. Sequencing (Route A)
+1. Build + `verify` green on M5 and on matebook using a **throwaway pane** (never Mate's).
+2. `herdr integration uninstall claude` on matebook (removes the official SessionStart hook).
+3. Install ours; confirm on a fresh Claude pane: `working` within one tick of a prompt, `blocked`
+   within one tick of `PermissionRequest`, `idle` only after `Stop` with empty `background_tasks`.
+4. Then, and only then, tell Mate to start new sessions.
