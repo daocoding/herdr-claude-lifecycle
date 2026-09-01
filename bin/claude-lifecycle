@@ -106,7 +106,7 @@ def capture():
         except subprocess.TimeoutExpired: print(f"run {name}: TIMEOUT")
     json.dump({"claude_version":claude_version(),"captured_at":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),"host":os.uname().nodename,"platform":sys.platform},
               open(os.path.join(HERE,"fixtures","CAPTURED.json"),"w"),indent=1)
-    got=sorted(glob.glob(os.path.join(cap,"*.json"))); got=[g for g in got if not g.endswith("settings.json")]
+    got=sorted(g for g in glob.glob(os.path.join(cap,"*.json")) if os.path.basename(g).split(".")[0] in EVENTS)   # only event-named files; the installed reporter may share the dir
     kept=[]
     for g in got:
         ev=os.path.basename(g).split(".")[0]; dst=os.path.join(HERE,"fixtures",f"{ev}.json")
@@ -120,7 +120,7 @@ def run_claude(settings, env, prompt="Reply with exactly: ok"):
 def e2e():
     """Wire the REAL reporter exactly as install-hooks would, into a temp --settings file; run a throwaway claude -p; assert the state file."""
     td=tempfile.mkdtemp(prefix="cl-e2e-"); sf=os.path.join(td,"settings.json"); json.dump({"hooks":hooks_block()},open(sf,"w"))
-    env=dict(os.environ,XDG_STATE_HOME=td,CLAUDE_LIFECYCLE_CAPTURE_DIR=os.path.join(td,"raw")); env.pop("HERDR_ENV",None); env.pop("HERDR_PANE_ID",None)
+    env=dict(os.environ,XDG_STATE_HOME=td,CLAUDE_LIFECYCLE_RAW_DIR=os.path.join(td,"raw")); env.pop("HERDR_ENV",None); env.pop("HERDR_PANE_ID",None)
     r=run_claude(sf,env,"Use the Bash tool to run exactly: echo e2e-ok  — then reply done.")
     root=os.path.join(td,"omarchy","claude-lifecycle"); cur=os.path.join(root,"current.json"); fails=[]
     raw=sorted(glob.glob(os.path.join(td,"raw","*.json"))); evs=[]

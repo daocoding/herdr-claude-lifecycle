@@ -77,7 +77,7 @@ def pane_owner_gate(sock_path, pane):
 def main():
     raw = sys.stdin.read()
     if not raw.strip(): return
-    cap = os.environ.get("CLAUDE_LIFECYCLE_CAPTURE_DIR")       # optional: harvest raw payloads from a real session
+    cap = os.environ.get("CLAUDE_LIFECYCLE_RAW_DIR")           # optional: harvest raw payloads from a real session (NOT the capture hook's dir)
     if cap:
         try:
             os.makedirs(cap, exist_ok=True); open(os.path.join(cap, f"{time.time_ns()}.json"), "w").write(raw)
