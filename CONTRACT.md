@@ -79,3 +79,14 @@ Consumers must treat `updated_at` older than 15 min as stale → hide.
 3. Install ours; confirm on a fresh Claude pane: `working` within one tick of a prompt, `blocked`
    within one tick of `PermissionRequest`, `idle` only after `Stop` with empty `background_tasks`.
 4. Then, and only then, tell Mate to start new sessions.
+
+
+## 6. Measured on herdr 0.8.2 (matebook, 2026-09-01) — facts the design now rests on
+
+- **`{"result":{"type":"ok"}}` is a transport receipt, not an application receipt.** Seven reports + a release to an owned pane all returned `ok` and moved `state_change_seq` by zero. `agent.explain` cannot see authored-state decisions (screen detector only). **The only verdict is `agent.get {target:<pane>}` read back after the report** — `tests/herdr-live.sh` does this with row 0 = before any feed.
+- **Discriminator = `agent_session.source`.** Fresh pane (no persisted identity): `daocoding:claude` reports land — working / blocked / idle / working-with-background-tasks all read back (0 failed). Pane whose persisted identity is `herdr:claude`: every foreign source is inert by design (`state.rs current_session_owner_conflicts`, both report paths); takeover requires `agent_resume::plan()` to accept the source, which it refuses for non-official sources. Only that Claude's own exit clears its ref (`process_exit_clears_matching_persisted_session_ref`); a foreign release cannot.
+- **A release must carry `seq`** — herdr's per-source ordering guard drops a seq-less release as stale.
+- **herdr renders a reported `idle` as `done` on a pane not viewed since** — its presentation; this reporter never emits `done`.
+- **`claude --settings <file>` MERGES** with `~/.claude/settings.json`; `capture`/`e2e` therefore scrub `HERDR_*` so an installed herdr hook cannot claim a real pane for a throwaway session (it did, once — w2:p2, session 2793a917).
+- **`Stop.background_tasks` is present** in real payloads on 2.1.251, 2.1.252 and 2.1.257. **No hook payload carries `version`** — the version is stamped by `install-hooks`/`verify` (never spawned inside a hook). `PermissionRequest`/`Notification` do not fire under `claude -p`; their fixtures come from an interactive session.
+- **Route A migration:** after `herdr integration uninstall claude`, existing panes keep their `herdr:claude` identity until that Claude exits ⇒ exit and relaunch `claude` once per pane; if a stale ref survives (pane was a bare shell), close and recreate the pane. New panes need nothing.

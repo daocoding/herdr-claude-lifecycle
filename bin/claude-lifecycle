@@ -96,7 +96,8 @@ def capture():
     settings={"hooks":{ev:[{**({} if ev in NO_MATCHER else {"matcher":"*"}),"hooks":[{"type":"command","command":f"bash '{hook}'","timeout":10}]}] for ev in EVENTS}}
     sf=os.path.join(cap,"settings.json"); json.dump(settings,open(sf,"w"))
     env=dict(os.environ,CLAUDE_LIFECYCLE_CAPTURE_DIR=cap)
-    for k in ("CLAUDECODE","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_CHILD_SESSION"): env.pop(k,None)
+    for k in ("CLAUDECODE","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_CHILD_SESSION","HERDR_ENV","HERDR_PANE_ID","HERDR_SOCKET_PATH"): env.pop(k,None)
+    # HERDR_* scrubbed: --settings MERGES with ~/.claude/settings.json, so an installed herdr SessionStart hook would otherwise claim a real pane for this throwaway session
     RUNS=[("basic",["claude","-p","Reply with exactly: ok","--settings",sf,"--max-turns","1"]),
           ("tool-allowed",["claude","-p","Use the Bash tool to run exactly: echo capture-ok  — then reply done.","--settings",sf,"--max-turns","3","--allowedTools","Bash(echo *)"]),
           ("tool-denied",["claude","-p","Use the Bash tool to run exactly: uname -a  — then reply done.","--settings",sf,"--max-turns","3"])]
@@ -113,7 +114,8 @@ def capture():
     print(f"captured events: {[os.path.basename(g).split('.')[0] for g in got]}"); print(f"new fixtures: {kept}")
     print("NOTE: PermissionRequest/Notification/Elicitation need an interactive session to capture — add them from a real run.")
 def run_claude(settings, env, prompt="Reply with exactly: ok"):
-    for k in ("CLAUDECODE","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_CHILD_SESSION"): env.pop(k,None)
+    for k in ("CLAUDECODE","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_CHILD_SESSION","HERDR_ENV","HERDR_PANE_ID","HERDR_SOCKET_PATH"): env.pop(k,None)
+    # HERDR_* scrubbed: --settings MERGES with ~/.claude/settings.json, so an installed herdr SessionStart hook would otherwise claim a real pane for this throwaway session
     return subprocess.run(["claude","-p",prompt,"--settings",settings,"--max-turns","3","--allowedTools","Bash(echo *)"],capture_output=True,text=True,env=env,timeout=240)
 def e2e():
     """Wire the REAL reporter exactly as install-hooks would, into a temp --settings file; run a throwaway claude -p; assert the state file."""
