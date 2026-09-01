@@ -1,1 +1,17 @@
-{"session_id":"34021037-6db7-43b9-b578-94a88963011d","transcript_path":"/Users/tony/.claude/projects/-Users-tony-dev-omarchy-herdr-claude-lifecycle/34021037-6db7-43b9-b578-94a88963011d.jsonl","cwd":"/Users/tony/dev/omarchy/herdr-claude-lifecycle","prompt_id":"4eb8a251-1403-4bc5-85e5-e7c684d935e9","permission_mode":"default","effort":{"level":"xhigh"},"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo capture-ok","description":"Echo capture-ok"},"tool_use_id":"toolu_01CAN32R3LzRr9VV91EaB6Jx"}
+{
+ "session_id": "34021037-6db7-43b9-b578-94a88963011d",
+ "transcript_path": "~/.claude/projects/-Users-tony-dev-omarchy-herdr-claude-lifecycle/34021037-6db7-43b9-b578-94a88963011d.jsonl",
+ "cwd": "~/dev/omarchy/herdr-claude-lifecycle",
+ "prompt_id": "4eb8a251-1403-4bc5-85e5-e7c684d935e9",
+ "permission_mode": "default",
+ "effort": {
+  "level": "xhigh"
+ },
+ "hook_event_name": "PreToolUse",
+ "tool_name": "Bash",
+ "tool_input": {
+  "command": "echo capture-ok",
+  "description": "Echo capture-ok"
+ },
+ "tool_use_id": "toolu_01CAN32R3LzRr9VV91EaB6Jx"
+}

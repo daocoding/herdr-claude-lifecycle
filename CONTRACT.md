@@ -102,3 +102,5 @@ Consumers must treat `updated_at` older than 15 min as stale → hide.
 - `CLAUDE_LIFECYCLE_SKIP_GATE=1` exists for tests/harnesses that feed fixtures from outside a pane (`tests/herdr-live.sh` uses it); the installed hooks never set it.
 
 **Cost:** one extra socket round-trip per session (not per event). Tested: `tests/gate.sh` (fake herdr: positive, negative, herdr-down) and live on matebook (SSH feed = negative, `herdr pane run` feed = positive).
+
+**Measured after Route A (2026-09-01, herdr 0.8.2 + Claude Code 2.1.257):** the installed hooks alone drove a real `claude -p` in a fresh pane through `unknown → idle (1 s) → working (3 s) → done (6 s) → unknown (7 s)`, read from `herdr pane get`. **herdr ignores `pane.report_agent_session` from a non-official source** (same param shape as the official v8 script; `ok` receipt, `agent_session` stays empty) — so identity for Claude panes lives in **our state file**: `claude-lifecycle status --pane <id>` returns the live `session_id` for a pane. The identity report stays in the hook (exercised every SessionStart, currently inert) so identity appears the day herdr accepts it.

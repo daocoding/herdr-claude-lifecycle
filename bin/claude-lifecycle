@@ -110,7 +110,7 @@ def capture():
     kept=[]
     for g in got:
         ev=os.path.basename(g).split(".")[0]; dst=os.path.join(HERE,"fixtures",f"{ev}.json")
-        if ev not in kept: shutil.copy(g,dst); kept.append(ev)
+        if ev not in kept: shutil.copy(g,dst); scrub(dst); kept.append(ev)
     print(f"captured events: {[os.path.basename(g).split('.')[0] for g in got]}"); print(f"new fixtures: {kept}")
     print("NOTE: PermissionRequest/Notification/Elicitation need an interactive session to capture — add them from a real run.")
 def run_claude(settings, env, prompt="Reply with exactly: ok"):
@@ -140,7 +140,27 @@ def e2e():
     if r.stderr and "hook" in r.stderr.lower(): fails.append(f"hook error on stderr: {r.stderr.strip()[:200]!r}")
     if fails: print("E2E FAILED"); [print("  -",x) for x in fails]; return 1
     print("E2E OK — install-hooks wiring shape is honoured by", claude_version()); return 0
+def scrub(path):
+    """Fixtures are replayed for state mapping only: drop the home path from cwd/transcript_path before they ship."""
+    try:
+        d=json.load(open(path)); home=os.path.expanduser("~")
+        for k in ("cwd","transcript_path"):
+            if isinstance(d.get(k),str): d[k]=d[k].replace(home,"~")
+        json.dump(d,open(path,"w"),indent=1)
+    except Exception: pass
 def status():
+    """status            → current.json (the Claude the bar shows)
+       status --pane ID  → the live session that owns herdr pane ID (pane→session lookup; herdr ignores our identity report)"""
+    args=sys.argv[2:]
+    if args[:1]==["--pane"] and len(args)>1:
+        pane=args[1]; best=None
+        for f in glob.glob(os.path.join(STATE_ROOT,"*.json")):
+            if f.endswith("current.json"): continue
+            try: d=json.load(open(f))
+            except Exception: continue
+            if d.get("pane_id")==pane and d.get("state")!="release" and (best is None or d.get("updated_at","")>best.get("updated_at","")): best=d
+        if not best: print(json.dumps({"pane_id":pane,"session_id":None})); return 1
+        print(json.dumps({k:best.get(k) for k in ("pane_id","session_id","state","since","updated_at","pane_owner","claude_version")})); return 0
     cur=os.path.join(STATE_ROOT,"current.json")
     if not os.path.exists(cur): print("no state"); return 0
     d=json.load(open(cur)); print(json.dumps(d,indent=1)); return 0

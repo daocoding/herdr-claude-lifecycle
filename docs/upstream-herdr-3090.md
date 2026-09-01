@@ -10,6 +10,8 @@
 2. On a pane whose persisted `agent_session.source` is `herdr:claude`, the same reports return `{"result":{"type":"ok"}}` and change nothing (`state_change_seq` frozen). `state.rs current_session_owner_conflicts` + `agent_resume::plan()` refusing non-official sources means no third-party source can ever author state on a pane the official integration has touched — even with the Claude process in the foreground.
 3. `agent.explain` reports only the screen-detection path; a dropped authored report is invisible to it.
 4. `pane.release_agent` without `seq` is dropped as stale (no error).
+5. `pane.report_agent_session` from a non-official source (identical params to the official script) returns `ok` and sets nothing — third-party lifecycle sources cannot populate `agent_session`.
+6. `pane.process_info` ignores an unknown param name (`target`) and answers for the **focused** pane instead of erroring — a wrong-pane answer that looks right.
 
 ## Ask (any of)
 - A. Make `("herdr:claude","claude")` a full-lifecycle-hook authority source and have the official script report `working` on `UserPromptSubmit`/`PreToolUse`/`PostToolUse`, `blocked` on `PermissionRequest` / `Notification{permission_prompt,elicitation_*,agent_needs_input}`, `idle` on `Stop` **iff** `background_tasks == []` else `working`, release on `SessionEnd`; ignore `SubagentStop` (#198) and any payload with `agent_id`.
