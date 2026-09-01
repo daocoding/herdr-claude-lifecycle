@@ -1,0 +1,20 @@
+# Draft — herdr issue (bug template), re: #3090 — NOT POSTED
+
+**Title:** Claude Code: `Stop.background_tasks` gives a hook-authoritative idle/working signal; official integration stays identity-only and blocks third-party lifecycle sources
+
+## Summary
+`herdr integration install claude` (v8/v9 `herdr-agent-state.sh`) reports identity on `SessionStart` only, so Claude panes are still screen-detected for `working`/`blocked`/`idle`. Claude Code's hooks now carry enough to author state directly, and the piece that made `Stop` ambiguous is solved upstream: the `Stop` payload includes `background_tasks: [...]` (measured on 2.1.251, 2.1.252, 2.1.257), so a turn that ended while MCP tasks / background agents are still running is distinguishable from a genuinely idle pane.
+
+## What we measured (herdr 0.8.2, Linux)
+1. A non-official source (`daocoding:claude`, agent `claude`) reporting `pane.report_agent` on a **fresh pane** is applied: working / blocked / idle / release all read back via `agent.get` (`state_change_seq` advances). Full table: <link to tests/herdr-live.sh output>.
+2. On a pane whose persisted `agent_session.source` is `herdr:claude`, the same reports return `{"result":{"type":"ok"}}` and change nothing (`state_change_seq` frozen). `state.rs current_session_owner_conflicts` + `agent_resume::plan()` refusing non-official sources means no third-party source can ever author state on a pane the official integration has touched — even with the Claude process in the foreground.
+3. `agent.explain` reports only the screen-detection path; a dropped authored report is invisible to it.
+4. `pane.release_agent` without `seq` is dropped as stale (no error).
+
+## Ask (any of)
+- A. Make `("herdr:claude","claude")` a full-lifecycle-hook authority source and have the official script report `working` on `UserPromptSubmit`/`PreToolUse`/`PostToolUse`, `blocked` on `PermissionRequest` / `Notification{permission_prompt,elicitation_*,agent_needs_input}`, `idle` on `Stop` **iff** `background_tasks == []` else `working`, release on `SessionEnd`; ignore `SubagentStop` (#198) and any payload with `agent_id`.
+- B. Or: return an explicit error (not `ok`) when a report is dropped for owner conflict, and let `agent.explain` show the authored-state decision, so third-party integrations can detect the block.
+- C. Or: document that `herdr integration install claude` makes panes unreachable by any other source, so users can choose.
+
+## Environment
+herdr 0.8.2 · Claude Code 2.1.252/2.1.257 · Omarchy 4.0.1 (Arch) · reference implementation: https://github.com/daocoding/herdr-claude-lifecycle (contract + tests)
