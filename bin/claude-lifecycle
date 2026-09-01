@@ -9,6 +9,12 @@ NO_MATCHER={"UserPromptSubmit","Stop","TaskCompleted"}          # hooks.md: no m
 SETTINGS=os.environ.get("CLAUDE_LIFECYCLE_SETTINGS") or os.path.join(os.environ.get("CLAUDE_CONFIG_DIR",os.path.expanduser("~/.claude")),"settings.json")
 STATE_ROOT=os.path.join(os.environ.get("XDG_STATE_HOME",os.path.expanduser("~/.local/state")),"omarchy","claude-lifecycle")
 MARK="claude-lifecycle.py"
+VSTAMP=os.path.join(STATE_ROOT,"claude_version")
+def claude_version():
+    try: return subprocess.run(["claude","--version"],capture_output=True,text=True,timeout=20).stdout.strip()
+    except Exception: return ""
+def stamp_version():
+    v=claude_version(); os.makedirs(STATE_ROOT,exist_ok=True); open(VSTAMP,"w").write(v+"\n"); return v
 def load():
     try: return json.load(open(SETTINGS))
     except FileNotFoundError: return {}
@@ -25,7 +31,7 @@ def install_hooks():
     d=load(); hooks=d.setdefault("hooks",{})
     for ev in EVENTS:
         arr=hooks.setdefault(ev,[]); arr[:]=[g for g in arr if not ours(g)]; arr.append(entry(ev))
-    save(d); print(f"installed {len(EVENTS)} hook wirings → {SETTINGS}")
+    save(d); v=stamp_version(); print(f"installed {len(EVENTS)} hook wirings → {SETTINGS}  (claude {v or '?'})")
 def uninstall_hooks():
     d=load(); hooks=d.get("hooks",{}); n=0
     for ev in list(hooks):
@@ -67,11 +73,11 @@ def verify(quiet=False):
         if exp=="?": continue
         if exp is None and state is not None and ev!="Notification": fails.append(f"{os.path.basename(f)}: {ev} should be ignored, produced {state}")
         elif exp is not None and state!=exp: fails.append(f"{os.path.basename(f)}: {ev} → {state}, expected {exp}")
-    cv=subprocess.run(["claude","--version"],capture_output=True,text=True).stdout.strip()
+    cv=stamp_version()
     fv=None
-    for f in fx:
-        v=json.load(open(f)).get("version")
-        if v: fv=v; break
+    try: fv=json.load(open(os.path.join(HERE,"fixtures","CAPTURED.json"))).get("claude_version")
+    except Exception: pass
+    if fv and cv and fv!=cv: fails.append(f"fixtures were captured from {fv!r} but installed claude is {cv!r} — run `claude-lifecycle capture` and re-verify")
     if not quiet:
         print(f"claude installed: {cv or 'not found'}   fixtures captured from: {fv or 'unknown'}")
         print(f"fixtures: {len(fx)}   wiring: {'ok' if not miss else 'INCOMPLETE'}")
@@ -80,19 +86,25 @@ def verify(quiet=False):
     print("VERIFY OK"); return 0
 def capture():
     """Run a throwaway headless Claude session with ONLY the capture hook, via --settings, and store payloads as fixtures."""
-    cap=tempfile.mkdtemp(prefix="cl-capture-"); shutil.rmtree(cap); os.makedirs(cap)
+    cap=tempfile.mkdtemp(prefix="cl-capture-"); os.makedirs(os.path.join(HERE,"fixtures"),exist_ok=True)
     hook=os.path.join(HERE,"hooks","capture-payload.sh")
     settings={"hooks":{ev:[{**({} if ev in NO_MATCHER else {"matcher":"*"}),"hooks":[{"type":"command","command":f"bash '{hook}'","timeout":10}]}] for ev in EVENTS}}
     sf=os.path.join(cap,"settings.json"); json.dump(settings,open(sf,"w"))
     env=dict(os.environ,CLAUDE_LIFECYCLE_CAPTURE_DIR=cap)
     for k in ("CLAUDECODE","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_CHILD_SESSION"): env.pop(k,None)
-    r=subprocess.run(["claude","-p","Reply with exactly: ok","--settings",sf,"--max-turns","1"],capture_output=True,text=True,env=env,timeout=180)
-    print(f"claude -p exit {r.returncode}: {(r.stdout or r.stderr).strip()[:200]!r}")
+    RUNS=[("basic",["claude","-p","Reply with exactly: ok","--settings",sf,"--max-turns","1"]),
+          ("tool-allowed",["claude","-p","Use the Bash tool to run exactly: echo capture-ok  — then reply done.","--settings",sf,"--max-turns","3","--allowedTools","Bash(echo *)"]),
+          ("tool-denied",["claude","-p","Use the Bash tool to run exactly: uname -a  — then reply done.","--settings",sf,"--max-turns","3"])]
+    for name,cmd in RUNS:
+        try: r=subprocess.run(cmd,capture_output=True,text=True,env=env,timeout=180); print(f"run {name}: exit {r.returncode}: {(r.stdout or r.stderr).strip()[:120]!r}")
+        except subprocess.TimeoutExpired: print(f"run {name}: TIMEOUT")
+    json.dump({"claude_version":claude_version(),"captured_at":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),"host":os.uname().nodename,"platform":sys.platform},
+              open(os.path.join(HERE,"fixtures","CAPTURED.json"),"w"),indent=1)
     got=sorted(glob.glob(os.path.join(cap,"*.json"))); got=[g for g in got if not g.endswith("settings.json")]
-    os.makedirs(os.path.join(HERE,"fixtures"),exist_ok=True); kept=[]
+    kept=[]
     for g in got:
         ev=os.path.basename(g).split(".")[0]; dst=os.path.join(HERE,"fixtures",f"{ev}.json")
-        if not os.path.exists(dst): shutil.copy(g,dst); kept.append(ev)
+        if ev not in kept: shutil.copy(g,dst); kept.append(ev)
     print(f"captured events: {[os.path.basename(g).split('.')[0] for g in got]}"); print(f"new fixtures: {kept}")
     print("NOTE: PermissionRequest/Notification/Elicitation need an interactive session to capture — add them from a real run.")
 def status():

@@ -23,6 +23,10 @@ def decide(h):
     if ev == "SessionEnd": return "release", "", []
     return None                                              # SubagentStop (#198) and unknown events: ignored
 
+def _stamp(root):
+    try: return open(os.path.join(root, "claude_version")).read().strip() or None
+    except Exception: return None
+
 def main():
     raw = sys.stdin.read()
     if not raw.strip(): return
@@ -67,7 +71,7 @@ def main():
         slim = [{k: t.get(k) for k in ("type", "status", "server", "tool", "agent_type", "name") if t.get(k) is not None} for t in bg]
         rec = {"contract_version": 1, "session_id": sid, "state": state, "since": since, "updated_at": ts, "pane_id": pane or None,
                "background_tasks": slim, "block_reason": reason or None, "last_event": ev,
-               "claude_version": h.get("version") or None, "reporter_version": REPORTER_VERSION}
+               "claude_version": h.get("version") or _stamp(root), "reporter_version": REPORTER_VERSION}
         for path in (f, os.path.join(root, "current.json")):
             tmp = path + f".tmp.{os.getpid()}"; open(tmp, "w").write(json.dumps(rec, separators=(",", ":"))); os.replace(tmp, path)
         if state == "release":
