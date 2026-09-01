@@ -4,6 +4,9 @@ Hook-first **Claude Code lifecycle for [herdr](https://herdr.dev)** — `working
 
 **Status:** reporter proven on herdr 0.8.2 (fresh pane, all states read back), e2e-green on Claude Code 2.1.252 and 2.1.257. See [CONTRACT.md](CONTRACT.md) for the design and the measured facts.
 
+## The bar face
+The companion Omarchy bar widget **[omarchy-claude-agent](https://github.com/daocoding/omarchy-claude-agent)** watches the state file this reporter writes and shows one Claude mark: full while working, an urgent dot while waiting on you, dimmed while idle, absent when no session is live.
+
 ## How it works
 - `hooks/claude-lifecycle.py` — one Python process per hook event (~30–50 ms; the tool events run `async`). Silent on stdout, exit 0 always. Maps
   `SessionStart→idle · UserPromptSubmit/PreToolUse/PostToolUse→working · PermissionRequest/Notification(permission_prompt…)→blocked · Stop→idle iff background_tasks==[] · SessionEnd→release`, ignores `SubagentStop` and subagent hooks.
