@@ -6,6 +6,7 @@ HOOK=os.path.join(HERE,"hooks","claude-lifecycle.py")
 EVENTS=["SessionStart","UserPromptSubmit","PreToolUse","PostToolUse","PostToolUseFailure","PermissionRequest",
         "Notification","Elicitation","ElicitationResult","Stop","SubagentStop","TaskCompleted","PreCompact","SessionEnd"]
 NO_MATCHER={"UserPromptSubmit","Stop","TaskCompleted"}          # hooks.md: no matcher support
+ASYNC={"PreToolUse","PostToolUse","PostToolUseFailure","PreCompact"}  # high-frequency "working" events: off the critical path (hooks.md §async)
 SETTINGS=os.environ.get("CLAUDE_LIFECYCLE_SETTINGS") or os.path.join(os.environ.get("CLAUDE_CONFIG_DIR",os.path.expanduser("~/.claude")),"settings.json")
 STATE_ROOT=os.path.join(os.environ.get("XDG_STATE_HOME",os.path.expanduser("~/.local/state")),"omarchy","claude-lifecycle")
 MARK="claude-lifecycle.py"
@@ -22,11 +23,14 @@ def save(d):
     os.makedirs(os.path.dirname(SETTINGS),exist_ok=True)
     if os.path.exists(SETTINGS): shutil.copy2(SETTINGS,SETTINGS+f".bak-claude-lifecycle-{int(time.time())}")
     tmp=SETTINGS+".tmp"; json.dump(d,open(tmp,"w"),indent=2); open(tmp,"a").write("\n"); os.replace(tmp,SETTINGS)
-def entry(ev):
-    e={"hooks":[{"type":"command","command":f"python3 '{HOOK}'","timeout":10}]}
+def entry(ev, hook=None):
+    h={"type":"command","command":"python3","args":[hook or HOOK],"timeout":10}   # exec form: no sh -c, no quoting
+    if ev in ASYNC: h["async"]=True
+    e={"hooks":[h]}
     if ev not in NO_MATCHER: e["matcher"]="*"
     return e
-def ours(grp): return any(MARK in (h.get("command") or "") for h in grp.get("hooks",[]))
+def hooks_block(hook=None): return {ev:[entry(ev,hook)] for ev in EVENTS}
+def ours(grp): return any(MARK in ((h.get("command") or "")+" ".join(h.get("args") or [])) for h in grp.get("hooks",[]))
 def install_hooks():
     d=load(); hooks=d.setdefault("hooks",{})
     for ev in EVENTS:
@@ -108,6 +112,32 @@ def capture():
         if ev not in kept: shutil.copy(g,dst); kept.append(ev)
     print(f"captured events: {[os.path.basename(g).split('.')[0] for g in got]}"); print(f"new fixtures: {kept}")
     print("NOTE: PermissionRequest/Notification/Elicitation need an interactive session to capture — add them from a real run.")
+def run_claude(settings, env, prompt="Reply with exactly: ok"):
+    for k in ("CLAUDECODE","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_CHILD_SESSION"): env.pop(k,None)
+    return subprocess.run(["claude","-p",prompt,"--settings",settings,"--max-turns","3","--allowedTools","Bash(echo *)"],capture_output=True,text=True,env=env,timeout=240)
+def e2e():
+    """Wire the REAL reporter exactly as install-hooks would, into a temp --settings file; run a throwaway claude -p; assert the state file."""
+    td=tempfile.mkdtemp(prefix="cl-e2e-"); sf=os.path.join(td,"settings.json"); json.dump({"hooks":hooks_block()},open(sf,"w"))
+    env=dict(os.environ,XDG_STATE_HOME=td,CLAUDE_LIFECYCLE_CAPTURE_DIR=os.path.join(td,"raw")); env.pop("HERDR_ENV",None); env.pop("HERDR_PANE_ID",None)
+    r=run_claude(sf,env,"Use the Bash tool to run exactly: echo e2e-ok  — then reply done.")
+    root=os.path.join(td,"omarchy","claude-lifecycle"); cur=os.path.join(root,"current.json"); fails=[]
+    raw=sorted(glob.glob(os.path.join(td,"raw","*.json"))); evs=[]
+    for f in raw:
+        try: evs.append(json.load(open(f)).get("hook_event_name"))
+        except Exception: evs.append("?")
+    print(f"claude -p exit {r.returncode}: {(r.stdout or r.stderr).strip()[:80]!r}"); print(f"events reached reporter ({len(evs)}): {evs}")
+    if r.returncode!=0: fails.append("claude -p failed")
+    for need in ("SessionStart","UserPromptSubmit","PreToolUse","PostToolUse","Stop","SessionEnd"):
+        if need not in evs: fails.append(f"{need} never reached the reporter — wiring shape not honoured by this Claude Code")
+    if not os.path.exists(cur): fails.append("state file never written")
+    else:
+        d=json.load(open(cur)); print(f"current.json: state={d['state']} last_event={d['last_event']} claude_version={d.get('claude_version')}")
+        if d["last_event"]!="SessionEnd" or d["state"]!="release": fails.append(f"final state {d['state']}/{d['last_event']}, expected release/SessionEnd")
+        left=[f for f in glob.glob(os.path.join(root,"*.json")) if not f.endswith("current.json")]
+        if left: fails.append(f"session file(s) not released: {[os.path.basename(x) for x in left]}")
+    if r.stderr and "hook" in r.stderr.lower(): fails.append(f"hook error on stderr: {r.stderr.strip()[:200]!r}")
+    if fails: print("E2E FAILED"); [print("  -",x) for x in fails]; return 1
+    print("E2E OK — install-hooks wiring shape is honoured by", claude_version()); return 0
 def status():
     cur=os.path.join(STATE_ROOT,"current.json")
     if not os.path.exists(cur): print("no state"); return 0
@@ -115,4 +145,4 @@ def status():
 if __name__=="__main__":
     cmd=(sys.argv[1:] or ["status"])[0]
     {"install-hooks":install_hooks,"uninstall-hooks":uninstall_hooks,"verify":lambda:sys.exit(verify()),
-     "capture":capture,"status":lambda:sys.exit(status())}.get(cmd,lambda:print("usage: claude-lifecycle install-hooks|uninstall-hooks|verify|capture|status"))()
+     "capture":capture,"e2e":lambda:sys.exit(e2e()),"status":lambda:sys.exit(status())}.get(cmd,lambda:print("usage: claude-lifecycle install-hooks|uninstall-hooks|verify|capture|e2e|status"))()

@@ -4,14 +4,18 @@
 set -u; P="${1:?pane_id}"; R=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd); H="$R/hooks/claude-lifecycle.py"
 SOCK="${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}"; [ -S "$SOCK" ] || { echo "no herdr socket at $SOCK"; exit 2; }
 export HERDR_ENV=1 HERDR_PANE_ID="$P" HERDR_SOCKET_PATH="$SOCK" XDG_STATE_HOME="${XDG_STATE_HOME:-$(mktemp -d)}"
-rb(){ printf '%s\n' "{\"id\":\"rb\",\"method\":\"agent.get\",\"params\":{\"target\":\"$P\"}}" | python3 -c '
-import socket,sys,json,os; s=socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(os.environ["HERDR_SOCKET_PATH"]); s.sendall(sys.stdin.read().encode()); b=b""
+rb(){ python3 - "$P" <<'PYRB'
+import socket,sys,json,os
+p=sys.argv[1]; s=socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(os.environ["HERDR_SOCKET_PATH"])
+s.sendall((json.dumps({"id":"rb","method":"agent.get","params":{"target":p}})+"\n").encode()); b=b""
 while not b.endswith(b"\n"):
     c=s.recv(65536)
     if not c: break
     b+=c
 a=json.loads(b).get("result",{}).get("agent",{}); ses=a.get("agent_session") or {}
-print(f"{a.get(\"agent_status\",\"?\"):8} agent={a.get(\"agent\")} seq={a.get(\"state_change_seq\")} session_src={ses.get(\"source\")} labels={a.get(\"state_labels\")}")'; }
+print("%-8s agent=%s seq=%s session_src=%s labels=%s" % (a.get("agent_status","?"),a.get("agent"),a.get("state_change_seq"),ses.get("source"),a.get("state_labels")))
+PYRB
+}
 feed(){ printf '%s' "$2" | python3 "$H"; sleep 0.25; got=$(rb); st=${got%% *}
   if [ "$st" = "$3" ]; then echo "  ok   $1 → $got"; else echo "  FAIL $1 → $got   (want $3)"; fail=$((fail+1)); fi; }
 fail=0; SID="live-$$"
