@@ -17,7 +17,7 @@ def handle(c):
     except Exception: c.close(); return
     fg=int(open(os.path.join(T,"fg")).read())
     log.write(json.dumps({"method":req["method"],"params":req["params"]})+"\n"); log.flush()
-    if req["method"]=="pane.process_info": res={"type":"pane_process_info","process_info":{"pane_id":"t:p1","shell_pid":fg,"foreground_process_group_id":-1,"foreground_processes":[{"pid":fg,"name":"claude"}]}}
+    if req["method"]=="pane.process_info": res={"type":"pane_process_info","process_info":{"pane_id":req["params"].get("pane_id") or req["params"].get("target") or "t:p1","shell_pid":fg,"foreground_process_group_id":-1,"foreground_processes":[{"pid":fg,"name":"claude"}]}}
     else: res={"type":"ok"}
     c.sendall((json.dumps({"id":req["id"],"result":res})+"\n").encode()); c.close()
 while True:

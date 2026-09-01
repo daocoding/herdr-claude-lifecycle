@@ -57,17 +57,22 @@ def _ancestors(limit=8):
     return out
 
 def pane_owner_gate(sock_path, pane):
-    """True/False = this hook's Claude is/isn't the pane's foreground process. None = herdr could not answer (do not cache)."""
-    r = _rpc(sock_path, "pane.process_info", {"target": pane})
-    info = ((r or {}).get("result") or {}).get("process_info") if r else None
+    """True/False = this hook's Claude is/isn't the pane's foreground process. None = herdr could not answer FOR THIS PANE (do not cache).
+    herdr silently falls back to the focused pane when the param name is not the one it expects, so the answer is accepted
+    only if it names the pane we asked about."""
+    info = None
+    for params in ({"pane_id": pane}, {"target": pane}, {"pane": pane}):
+        r = _rpc(sock_path, "pane.process_info", params)
+        cand = ((r or {}).get("result") or {}).get("process_info") if r else None
+        if cand and str(cand.get("pane_id")) == str(pane): info = cand; break
     if not info: return None
     fg = {int(p.get("pid")) for p in (info.get("foreground_processes") or []) if p.get("pid") is not None}
     pgid = info.get("foreground_process_group_id")
-    if pgid is not None:
-        try:
-            if os.getpgrp() == int(pgid): return True
-        except Exception: pass
-    return any(a in fg for a in _ancestors())
+    try:
+        if pgid is not None and os.getpgrp() == int(pgid): return True
+    except Exception: pass
+    mine = {os.getpid(), *_ancestors()}
+    return bool(mine & fg)
 
 def main():
     raw = sys.stdin.read()
