@@ -56,7 +56,8 @@ EXPECT={"SessionStart":"idle","UserPromptSubmit":"working","PreToolUse":"working
 def verify(quiet=False):
     fails=[]
     miss=wiring_ok()
-    if miss: fails.append(f"wiring: missing {miss}")
+    if len(miss)==len(EVENTS): fails.append("wiring: NOT INSTALLED — run `claude-lifecycle install-hooks`")
+    elif miss: fails.append(f"wiring: PARTIAL — missing {miss}")
     fx=sorted(glob.glob(os.path.join(HERE,"fixtures","*.json")))
     if not fx: fails.append("fixtures: none captured — run `claude-lifecycle capture` after each Claude Code update")
     for f in fx:
@@ -80,7 +81,7 @@ def verify(quiet=False):
     if fv and cv and fv!=cv: fails.append(f"fixtures were captured from {fv!r} but installed claude is {cv!r} — run `claude-lifecycle capture` and re-verify")
     if not quiet:
         print(f"claude installed: {cv or 'not found'}   fixtures captured from: {fv or 'unknown'}")
-        print(f"fixtures: {len(fx)}   wiring: {'ok' if not miss else 'INCOMPLETE'}")
+        print(f"fixtures: {len(fx)}   wiring: {'ok' if not miss else ('not installed' if len(miss)==len(EVENTS) else 'PARTIAL')}")
     if fails:
         print("VERIFY FAILED"); [print("  -",x) for x in fails]; return 1
     print("VERIFY OK"); return 0

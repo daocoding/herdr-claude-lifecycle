@@ -30,6 +30,11 @@ def _stamp(root):
 def main():
     raw = sys.stdin.read()
     if not raw.strip(): return
+    cap = os.environ.get("CLAUDE_LIFECYCLE_CAPTURE_DIR")       # optional: harvest raw payloads from a real session
+    if cap:
+        try:
+            os.makedirs(cap, exist_ok=True); open(os.path.join(cap, f"{time.time_ns()}.json"), "w").write(raw)
+        except Exception: pass
     try: h = json.loads(raw)
     except Exception: return
     d = decide(h)
