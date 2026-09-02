@@ -62,16 +62,28 @@ def claude_process():
         if "claude" in _proc_name(pid).lower(): return pid, _proc_start(pid)
     return None, None
 
-def reap(root, keep):
-    """Delete state files whose Claude is gone. An idle session emits nothing, so silence can never mean dead —
-    only a dead process does. Any live session's next event cleans up after the crashed ones."""
+def live_panes(sock_path):
+    """Set of pane ids herdr currently knows. None when it can't answer — never treat that as 'all gone'."""
+    r = _rpc(sock_path, "pane.list", {})
+    panes = ((r or {}).get("result") or {}).get("panes") if r else None
+    if not isinstance(panes, list): return None
+    return {str(p.get("pane_id")) for p in panes if p.get("pane_id")}
+
+def reap(root, keep, sock_path=None):
+    """Delete state files for sessions that are gone. An idle session emits nothing, so silence can never mean
+    dead — only a dead process does. Any live session's next event cleans up after the departed ones.
+    Two death signals: the recorded Claude pid is gone, or (for records written before pids were recorded)
+    the herdr pane it names no longer exists."""
+    stale_paneless, panes = [], None
     for f in glob.glob(os.path.join(root, "*.json")):
         b = os.path.basename(f)
         if b in ("current.json", keep + ".json"): continue
         try: d = json.load(open(f))
         except Exception: continue
         pid = d.get("claude_pid")
-        if not pid: continue                      # older reporter wrote it; leave it to the consumer's timeout
+        if not pid:
+            if d.get("pane_id"): stale_paneless.append((f, str(d["pane_id"])))
+            continue
         alive = True
         try:
             os.kill(int(pid), 0)
@@ -82,6 +94,14 @@ def reap(root, keep):
         if not alive:
             try: os.remove(f)
             except OSError: pass
+    # Only pay for the pane lookup when something actually needs judging by it.
+    if stale_paneless and sock_path:
+        panes = live_panes(sock_path)
+        if panes is not None:
+            for f, pane in stale_paneless:
+                if pane not in panes:
+                    try: os.remove(f)
+                    except OSError: pass
 
 def _ancestors(limit=8):
     """pids of this process's ancestors (parent first). Linux via /proc; macOS via ps."""
@@ -209,7 +229,7 @@ def main():
         if state == "release":
             try: os.remove(f)
             except FileNotFoundError: pass
-        reap(root, sid)
+        reap(root, sid, sock if in_herdr else None)
     finally:
         try: os.remove(os.path.join(lock, "pid"))
         except FileNotFoundError: pass
