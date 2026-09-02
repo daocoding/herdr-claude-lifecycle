@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """claude-lifecycle reporter — Claude Code hook (JSON on stdin) → herdr pane state + Omarchy state file.
 CONTRACT.md §1: silent on stdout, exit 0 always, <100 ms, per-key monotonic seq. One process, no subshells."""
-import json, os, socket, sys, time
+import glob, json, os, socket, sys, time
 REPORTER_VERSION = "0.1.0"
 BLOCK_NOTIF = {"permission_prompt", "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input"}
 WORKING = {"UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "ElicitationResult", "PreCompact"}
@@ -40,6 +40,48 @@ def _rpc(sock_path, method, params, timeout=0.5):
     except Exception:
         return None
     finally: s.close()
+
+def _proc_name(pid):
+    try: return open(f"/proc/{pid}/comm").read().strip()
+    except Exception:
+        try:
+            import subprocess
+            return subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True, timeout=0.3).stdout.strip().rsplit("/", 1)[-1]
+        except Exception: return ""
+
+def _proc_start(pid):
+    """Process start time — pins a pid against reuse. None when unavailable (non-Linux)."""
+    try:
+        st = open(f"/proc/{pid}/stat").read()
+        return int(st[st.rindex(")") + 2:].split()[19])
+    except Exception: return None
+
+def claude_process():
+    """(pid, start) of the Claude this hook belongs to — the liveness handle for a session that has gone quiet."""
+    for pid in _ancestors():
+        if "claude" in _proc_name(pid).lower(): return pid, _proc_start(pid)
+    return None, None
+
+def reap(root, keep):
+    """Delete state files whose Claude is gone. An idle session emits nothing, so silence can never mean dead —
+    only a dead process does. Any live session's next event cleans up after the crashed ones."""
+    for f in glob.glob(os.path.join(root, "*.json")):
+        b = os.path.basename(f)
+        if b in ("current.json", keep + ".json"): continue
+        try: d = json.load(open(f))
+        except Exception: continue
+        pid = d.get("claude_pid")
+        if not pid: continue                      # older reporter wrote it; leave it to the consumer's timeout
+        alive = True
+        try:
+            os.kill(int(pid), 0)
+            st = d.get("claude_pid_start")
+            if st is not None and _proc_start(int(pid)) not in (None, st): alive = False   # pid reused
+        except (ProcessLookupError, ValueError): alive = False
+        except PermissionError: pass
+        if not alive:
+            try: os.remove(f)
+            except OSError: pass
 
 def _ancestors(limit=8):
     """pids of this process's ancestors (parent first). Linux via /proc; macOS via ps."""
@@ -146,6 +188,9 @@ def main():
             owner = pane_owner_gate(sock, pane)
         if in_herdr and os.environ.get("CLAUDE_LIFECYCLE_SKIP_GATE") == "1": owner = True
         slim = [{k: t.get(k) for k in ("type", "status", "server", "tool", "agent_type", "name") if t.get(k) is not None} for t in bg]
+        cpid, cstart = claude_process()
+        if cpid is None and prev_rec.get("claude_pid"):
+            cpid, cstart = prev_rec["claude_pid"], prev_rec.get("claude_pid_start")
         identity = {}
         if in_herdr and owner is True:
             identity = pane_identity(sock, pane)
@@ -154,6 +199,7 @@ def main():
         rec = {"contract_version": 1, "session_id": sid, "state": state, "since": since, "updated_at": ts, "pane_id": pane or None,
                "pane_owner": owner, "workspace_id": identity.get("workspace_id"), "workspace_label": identity.get("workspace_label"),
                "pane_name": identity.get("pane_name"), "agent_type": identity.get("agent_type"),
+               "claude_pid": cpid, "claude_pid_start": cstart,
                "background_tasks": slim, "block_reason": reason or None, "last_event": ev,
                "claude_version": h.get("version") or _stamp(root), "reporter_version": REPORTER_VERSION}
         # current.json = "the" Claude the bar shows: never let a non-owning session inside herdr (e.g. a `claude -p` from a pane shell) overwrite it
@@ -163,6 +209,7 @@ def main():
         if state == "release":
             try: os.remove(f)
             except FileNotFoundError: pass
+        reap(root, sid)
     finally:
         try: os.remove(os.path.join(lock, "pid"))
         except FileNotFoundError: pass
