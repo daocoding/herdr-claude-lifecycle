@@ -5,6 +5,11 @@ import glob, json, os, socket, sys, time
 REPORTER_VERSION = "0.1.0"
 BLOCK_NOTIF = {"permission_prompt", "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input"}
 WORKING = {"UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "ElicitationResult", "PreCompact"}
+# Background entries that are SUBSCRIPTIONS, not work. A monitor (e.g. artifact live-updates,
+# auto-armed on publish) runs for the life of the session and never completes, so counting it
+# as work pins the pane to "working" forever - measured 30h on one session. The pane is idle;
+# something is merely watching. Still reported in background_tasks, just not state-deciding.
+PASSIVE_BG = {"monitor"}
 
 def decide(h):
     ev = str(h.get("hook_event_name") or "")
@@ -18,7 +23,8 @@ def decide(h):
         return ("blocked", nt, []) if nt in BLOCK_NOTIF else None
     if ev == "Stop":
         bg = [t for t in (h.get("background_tasks") or []) if isinstance(t, dict)]
-        return ("working" if bg else "idle"), "", bg
+        work = [t for t in bg if str(t.get("type") or "") not in PASSIVE_BG]
+        return ("working" if work else "idle"), "", bg
     if ev == "TaskCompleted": return "idle", "", []          # a task finished; Stop will re-assert if others remain
     if ev == "SessionEnd": return "release", "", []
     return None                                              # SubagentStop (#198) and unknown events: ignored

@@ -31,7 +31,7 @@ stdin, derives one lifecycle state, and publishes it to every consumer that is p
 | `Notification` | `notification_type ∈ {permission_prompt, elicitation_dialog, elicitation_url_dialog, agent_needs_input}` | `blocked` |
 | `Notification` | other types | ignored |
 | `Elicitation` / `ElicitationResult` | — | `blocked` / `working` |
-| `Stop` | `background_tasks` | **`idle` iff `background_tasks == []`, else `working`** (this is the #3090 fix) |
+| `Stop` | `background_tasks` | **`idle` iff no ACTIVE task remains, else `working`** (the #3090 fix). Entries whose `type` is in `PASSIVE_BG` (currently `monitor`) are subscriptions, not work, and do not decide state: an artifact live-updates monitor is auto-armed on publish and never completes, which pinned one session to `working` for 30h. All entries are still reported in `background_tasks`. |
 | `SubagentStop` | — | **ignored** (herdr #198: fires after the main turn; never revive an idle pane) |
 | `TaskCompleted` | — | re-evaluate: if no other background task, `idle` |
 | `SessionEnd` | — | `release` |
