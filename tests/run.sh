@@ -21,6 +21,8 @@ t Notif-permission  "{\"hook_event_name\":\"Notification\",\"session_id\":\"$SID
 t Stop-with-bg      "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"background_tasks\":[{\"id\":\"t1\",\"type\":\"MCP task\",\"status\":\"running\",\"server\":\"codex\",\"tool\":\"review\"}],\"session_crons\":[]}" working
 echo "  bg payload slimmed: $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["background_tasks"])' "$S/current.json")"
 t Stop-empty-bg     "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"background_tasks\":[],\"session_crons\":[]}" idle
+t Stop-monitor+work  "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"background_tasks\":[{\"id\":\"m1\",\"type\":\"monitor\",\"status\":\"running\"},{\"id\":\"t1\",\"type\":\"MCP task\",\"status\":\"running\"}],\"session_crons\":[]}" working
+t Stop-monitor-only  "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"background_tasks\":[{\"id\":\"m1\",\"type\":\"monitor\",\"status\":\"running\",\"description\":\"live updates for artifact (auto-armed on publish)\"}],\"session_crons\":[]}" idle
 t SubagentStop-ign  "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"$SID\"}" IGNORED idle
 t subagent-ign      "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"$SID\",\"agent_id\":\"sub-1\"}" IGNORED idle
 t garbage           "not json at all" IGNORED idle
